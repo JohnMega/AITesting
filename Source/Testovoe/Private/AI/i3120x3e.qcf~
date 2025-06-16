@@ -1,0 +1,111 @@
+// Fill out your copyright notice in the Description page of Project Settings.
+
+
+#include "AI/NPC_Controller.h"
+#include "Perception/AISenseConfig_Sight.h"
+#include "Kismet/GameplayStatics.h"
+#include "AI/NPC.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "BehaviorTree/BehaviorTree.h"
+
+ANPC_Controller::ANPC_Controller(const FObjectInitializer& oI)
+{
+	PerceptionComponent = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("Perception component"));
+	SetupPerceptionSystem();
+}
+
+void ANPC_Controller::BeginPlay()
+{
+	Super::BeginPlay();
+
+	if (!sightConfig) SightConfigInit();
+
+	GetPerceptionComponent()->OnComponentDeactivated.AddDynamic(this, &ANPC_Controller::OnPerceptionComponentDeactivated);
+	GetPerceptionComponent()->OnComponentActivated.AddDynamic(this, &ANPC_Controller::OnPerceptionComponentActivated);
+	GetPerceptionComponent()->Activate();
+}
+
+void ANPC_Controller::OnPossess(APawn* inPawn)
+{
+	Super::OnPossess(inPawn);
+
+	if (!sightConfig) SightConfigInit();
+	if (BehaviorTree)
+	{
+		UBlackboardComponent* blackboard;
+		UseBlackboard(BehaviorTree->BlackboardAsset, blackboard);
+		Blackboard = blackboard;
+		Blackboard->SetValueAsEnum(TEXT("BehaviorState"), static_cast<uint8>(EBehaviorStateTypes::Patrol));
+
+		RunBehaviorTree(BehaviorTree);
+
+		CachedOwnerNPC = StaticCast<ANPC*>(inPawn);
+	}
+}
+
+void ANPC_Controller::SetupPerceptionSystem()
+{
+	SetPerceptionComponent(*PerceptionComponent);
+	GetPerceptionComponent()->OnTargetPerceptionUpdated.AddDynamic(this, &ANPC_Controller::OnTargetDetection);
+}
+
+void ANPC_Controller::OnTargetDetection(AActor* actor, const FAIStimulus stimulus)
+{
+	if (!GetPerceptionComponent()->IsActive() || CurrentPerceivedCharacter.IsValid()) return;
+
+	auto NPC = Cast<ANPC>(actor);
+	StaticCast<AAIController*>NPC->GetController()->GetBlack
+	if (NPC && NPC->GetGenericTeamId() != CachedOwnerNPC->GetGenericTeamId())
+	{
+		CurrentPerceivedCharacter = actor;
+		SetAttackTargetSightParams();
+		GetBlackboardComponent()->SetValueAsObject(TEXT("TargetCharacter"), actor);
+		GetBlackboardComponent()->SetValueAsEnum(TEXT("BehaviorState"), static_cast<uint8>(EBehaviorStateTypes::Chase));
+	}
+}
+
+void ANPC_Controller::SightConfigInit()
+{
+	sightConfig = GetPerceptionComponent()->GetSenseConfig<UAISenseConfig_Sight>();
+}
+
+void ANPC_Controller::SetStandartSightParams()
+{
+	//sightConfig->SightRadius = StandartSightRaduis;
+	//sightConfig->LoseSightRadius = StandartLoseSightRaduis;
+	//sightConfig->PeripheralVisionAngleDegrees = 120.0f;
+	GetPerceptionComponent()->ConfigureSense(*sightConfig);
+}
+
+void ANPC_Controller::SetAttackTargetSightParams()
+{
+	auto NPC = Cast<ANPC>(GetPawn());
+	if (!NPC) return;
+
+	//sightConfig->SightRadius = NPC->GetPartolSightRadius();
+	//sightConfig->LoseSightRadius = NPC->GetReachZoneRadius();
+	//sightConfig->PeripheralVisionAngleDegrees = 120.0f;
+	GetPerceptionComponent()->ConfigureSense(*sightConfig);
+}
+
+void ANPC_Controller::SetChaseSightParams()
+{
+	auto NPC = Cast<ANPC>(GetPawn());
+	if (!NPC) return;
+	
+	//sightConfig->SightRadius = NPC->GetChaseSightRadius();
+	//sightConfig->PeripheralVisionAngleDegrees = 180.0f;
+	GetPerceptionComponent()->ConfigureSense(*sightConfig);
+}
+
+void ANPC_Controller::OnPerceptionComponentDeactivated(UActorComponent* Component)
+{
+	GetBlackboardComponent()->SetValueAsEnum(TEXT("BehaviorState"), static_cast<uint8>(EBehaviorStateTypes::Passive));
+}
+
+void ANPC_Controller::OnPerceptionComponentActivated(UActorComponent* Component, bool bReset)
+{
+	GetBlackboardComponent()->SetValueAsEnum(TEXT("BehaviorState"), static_cast<uint8>(EBehaviorStateTypes::Patrol));
+	GetPerceptionComponent()->ForgetAll();
+	SetStandartSightParams();
+}
